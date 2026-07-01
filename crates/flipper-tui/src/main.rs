@@ -40,26 +40,39 @@ async fn run(terminal: &mut Term) -> Result<(), Box<dyn Error>> {
     let endpoints = flipper_transport::detect_devices();
     let chosen = endpoints.into_iter().next();
 
-    let info = if let Some(dev) = chosen {
-        let tx = SerialTransport::new(dev.path.clone(), 115_200);
-        tx.connect()
+    let mut tx: Box<dyn Transport> = if let Some(dev) = chosen {
+        let t = SerialTransport::new(dev.path.clone(), 115_200);
+        t.connect()
             .await
             .map_err(|e| format!("connect serial: {e}"))?;
-        flipper_core::hello(&tx)
-            .await
-            .map_err(|e| format!("device_info: {e}"))?
+        Box::new(t)
     } else {
         // Offline mode — seed the dashboard from a fixed fixture so
         // demos and CI runs still render something useful.
-        let tx = MockTransport::new();
-        tx.on("device_info", |_| {
+        let t = MockTransport::new();
+        t.on("device_info", |_| {
             flipper_transport::CommandResult::ok(MOMENTUM_FIXTURE.as_bytes().to_vec())
         });
-        tx.connect().await?;
-        flipper_core::hello(&tx).await?
+        t.on("storage list", |args| {
+            // Echo the requested path back inside the listing so the
+            // mock device behavior matches what the CLI bridge returns.
+            let path = args.first().copied().unwrap_or("/ext");
+            let listing = format!(
+                "        [D] ext         4096\n\
+                 \x20       [F] Manifest       24\n\
+                 \x20       [F] {path}\n"
+            );
+            flipper_transport::CommandResult::ok(listing.into_bytes())
+        });
+        t.connect().await?;
+        Box::new(t)
     };
 
-    flipper_tui_app::run(terminal, info).await
+    let info = flipper_core::hello(&*tx)
+        .await
+        .map_err(|e| format!("device_info: {e}"))?;
+
+    flipper_tui_app::run(terminal, info, tx.as_mut()).await
 }
 
 const MOMENTUM_FIXTURE: &str = "\
