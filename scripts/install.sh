@@ -82,14 +82,18 @@ resolve_ref() {
   fi
   # Case 2: user gave us an explicit ref name — resolve it.
   if [[ -n "${user_ref}" ]]; then
-    resolved="$(git ls-remote "${repo}" "${user_ref}" 2>/dev/null | awk '/refs\/(heads|tags)\// {print $1; exit}')"
+    resolved="$(git ls-remote "${repo}" "${user_ref}" 2>/dev/null | awk '!/^ref:/ && $1 ~ /^[0-9a-f]{40}$/ {print $1; exit}')"
     if [[ -n "${resolved}" ]]; then
       printf '%s\n' "${resolved}"
       return 0
     fi
   fi
   # Case 3: resolve ${REPO}'s HEAD (whatever its default branch is).
-  resolved="$(git ls-remote --symref "${repo}" HEAD 2>/dev/null | awk '/refs\/heads\// {print $1; exit}')"
+  # `git ls-remote --symref HEAD` emits two lines: a "ref: refs/heads/X
+  # HEAD" symref and a "<sha> HEAD" line. We need the SHA, NOT the
+  # symref's first field (which is the literal "ref:"), so skip lines
+  # starting with "ref:" and grab the 40-char hex on the next line.
+  resolved="$(git ls-remote --symref "${repo}" HEAD 2>/dev/null | awk '!/^ref:/ && $1 ~ /^[0-9a-f]{40}$/ {print $1; exit}')"
   if [[ -n "${resolved}" ]]; then
     printf '%s\n' "${resolved}"
     return 0
@@ -97,7 +101,6 @@ resolve_ref() {
   # Last resort — let cargo try with a literal "main".
   printf 'main\n'
 }
-
 REF="$(resolve_ref "${USER_REF}" "${REPO}")"
 log "installing flipper-tui from ${REPO} @ ${REF}"
 
@@ -167,6 +170,20 @@ for bin in flipper-tui flipper-tui-cli; do
 done
 
 # 5. Smoke test — `--help` is hermetic (doesn't touch the device).
+#
+#    On macOS, binaries installed to `~/.cargo/bin/` are not ad-hoc
+#    signed, so the kernel's AMFI hook kills them at exec time with
+#    `proc ...: load code signature error 2`. Re-sign them with the
+#    ad-hoc identity (`-`) before the smoke test so `--version`
+#    actually returns. Skip silently on non-macOS.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  log "ad-hoc codesigning installed binaries (macOS AMFI)"
+  for bin in flipper-tui flipper-tui-cli; do
+    codesign --sign - --force --deep "${INSTALL_BIN}/${bin}" >/dev/null 2>&1 || \
+      log "WARNING: codesign failed for ${bin}; --version may not run"
+  done
+fi
+
 log "smoke test: flipper-tui --version"
 flipper-tui --version || true
 log "smoke test: flipper-tui-cli --version"
