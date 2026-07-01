@@ -25,5 +25,5 @@ pub mod keymap;
 pub mod run;
 pub mod screens;
 
-pub use keymap::{Binding, ClickType, Keymap};
+pub use keymap::{Binding, ClickType, Keymap, NavBinding, NavKeymap};
 pub use run::{run, Screen};
