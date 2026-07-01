@@ -1,0 +1,73 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/flipper-transport",
+    "crates/flipper-core",
+    "crates/flipper-tui-app",
+    "crates/flipper-tui",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/ankurCES/flipper-tui"
+authors = ["ankurCES"]
+description = "Terminal UI for Flipper Zero — at-par with qFlipper"
+
+[workspace.dependencies]
+# Serial
+serialport = "4.6"
+
+# Async runtime
+tokio = { version = "1.41", features = ["rt-multi-thread", "macros", "sync", "time", "io-util"] }
+tokio-util = { version = "0.7", features = ["io"] }
+futures = "0.3"
+async-trait = "0.1"
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# CLI
+clap = { version = "4.5", features = ["derive", "wrap_help"] }
+
+# Errors / logging / serde / time
+thiserror = "2.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+hex = "0.4"
+bytes = "1.8"
+
+# Test-only
+[workspace.metadata.dev-dependencies]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+unused_must_use = "deny"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+# Allow these so the gate stays green while we iterate:
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+cast_possible_truncation = "allow"
+cast_lossless = "allow"
+cast_sign_loss = "allow"
+similar_names = "allow"
+struct_excessive_bools = "allow"

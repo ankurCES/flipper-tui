@@ -1,0 +1,25 @@
+[package]
+name = "flipper-tui-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Ratatui-based TUI screens and keymap for Flipper Zero — qFlipper-style"
+
+[lints]
+workspace = true
+
+[dependencies]
+flipper-core = { path = "../flipper-core" }
+flipper-transport = { path = "../flipper-transport" }
+tokio = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }
+ratatui = { workspace = true }

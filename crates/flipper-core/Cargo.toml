@@ -1,0 +1,28 @@
+[package]
+name = "flipper-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Domain ops for Flipper Zero — device info, storage, backup, firmware, updates"
+
+[lints]
+workspace = true
+
+[dependencies]
+flipper-transport = { path = "../flipper-transport" }
+tokio = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+hex = { workspace = true }
+flate2 = "1.0"
+tar = "0.4"
+
+[dev-dependencies]
+flipper-transport = { path = "../flipper-transport" }
+tokio = { workspace = true, features = ["rt", "macros", "test-util"] }

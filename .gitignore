@@ -1,16 +1,21 @@
-__pycache__/
-*.py[cod]
-*$py.class
-.venv/
-venv/
-env/
-dist/
-build/
-.pytest_cache/
-.ruff_cache/
-.coverage
-*.egg-info/
-.DS_Store
-*.swp
+# Cargo
+/target/
+/Cargo.lock.bak
+
+# Tooling caches
 .idea/
 .vscode/
+.DS_Store
+*.swp
+*.swo
+
+# Local Flipper device overrides (don't commit)
+/.env.local
+*.local
+
+# Coverage output
+/coverage/
+*.lcov
+
+# Benchmark outputs
+/benches/bencher.out
