@@ -197,29 +197,146 @@ mod tests {
     }
 
     #[test]
-    fn updates_holds_without_panicking() {
-        let _ = Updates::new();
-    }
+    fn snapshot_updates_not_supported() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::Terminal;
 
-    #[test]
-    fn updates_renders_unsupported_state() {
-        // Default v0.1: bridge doesn't speak update RPC.
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let updates = Updates::new();
         let info = sample_info();
         let status = sample_status(UpdateState::NotSupported);
-        let _ = (info, status);
+        terminal
+            .draw(|f| updates.render(f, Rect::new(0, 0, 80, 24), &info, &status))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Header + both panel titles.
+        assert!(
+            text.contains("flipper-tui"),
+            "missing 'flipper-tui':\n{text}"
+        );
+        assert!(
+            text.contains("updates"),
+            "missing 'updates' header:\n{text}"
+        );
+        assert!(
+            text.contains("installed"),
+            "missing 'installed' panel title:\n{text}"
+        );
+        // Installed panel rows from sample_info.
+        assert!(
+            text.contains("Branch"),
+            "missing 'Branch' key in installed panel:\n{text}"
+        );
+        assert!(
+            text.contains("mntm-012"),
+            "missing 'mntm-012' branch value:\n{text}"
+        );
+        assert!(
+            text.contains("e1784e74"),
+            "missing 'e1784e74' commit value:\n{text}"
+        );
+        // Status panel shows the not-supported literal hint.
+        assert!(
+            text.contains("not supported on this firmware"),
+            "missing 'not supported on this firmware' status hint:\n{text}"
+        );
+        // Footer hotkeys (gated `i` install must also be visible).
+        assert!(text.contains("check"), "footer missing 'check':\n{text}");
+        assert!(
+            text.contains("install"),
+            "footer missing 'install (gated)':\n{text}"
+        );
+        assert!(text.contains("back"), "footer missing 'back':\n{text}");
+        assert!(text.contains("quit"), "footer missing 'quit':\n{text}");
     }
 
     #[test]
-    fn updates_renders_no_updates_state() {
+    fn snapshot_updates_no_updates() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let updates = Updates::new();
         let info = sample_info();
         let status = sample_status(UpdateState::NoUpdates);
-        let _ = (info, status);
+        terminal
+            .draw(|f| updates.render(f, Rect::new(0, 0, 80, 24), &info, &status))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        assert!(
+            text.contains("up to date"),
+            "missing 'up to date' status hint:\n{text}"
+        );
     }
 
     #[test]
-    fn updates_renders_error_state() {
+    fn snapshot_updates_error() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let updates = Updates::new();
         let info = sample_info();
         let status = sample_status(UpdateState::Error("network unreachable".into()));
-        let _ = (info, status);
+        terminal
+            .draw(|f| updates.render(f, Rect::new(0, 0, 80, 24), &info, &status))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Status row reports an error.
+        assert!(
+            text.contains("network unreachable"),
+            "missing error message 'network unreachable':\n{text}"
+        );
     }
 }

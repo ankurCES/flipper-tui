@@ -159,13 +159,90 @@ mod tests {
         }
     }
 
+    fn collect_text(buf: &ratatui::buffer::Buffer, area: ratatui::layout::Rect) -> String {
+        let mut out = String::with_capacity(area.width as usize * area.height as usize);
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                let cell = &buf[(x, y)];
+                let mut chars = cell.symbol().chars();
+                out.push(chars.next().unwrap_or(' '));
+                // ignore any extra glyph weight to keep assertions stable
+                let _ = chars.next();
+            }
+        }
+        out
+    }
+
+    fn rect(x: u16, y: u16, w: u16, h: u16) -> ratatui::layout::Rect {
+        ratatui::layout::Rect::new(x, y, w, h)
+    }
+
     #[test]
-    fn dashboard_holds_without_panicking() {
-        let _ = Dashboard::new();
+    fn snapshot_dashboard() {
+        let backend = ratatui::backend::TestBackend::new(80, 24);
+        let mut terminal = ratatui::Terminal::new(backend).unwrap();
+        let dashboard = Dashboard::new();
         let info = sample();
-        // Just constructing the dashboard and reading the info shape is
-        // enough to prove the wiring compiles. Visual rendering needs a
-        // TestBackend and lands in the integration suite.
-        assert_eq!(info.firmware_branch, "mntm-012");
+        terminal
+            .draw(|f| dashboard.render(f, rect(0, 0, 80, 24), &info))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, rect(0, 0, 80, 24));
+
+        // Header line.
+        assert!(
+            text.contains("flipper-tui"),
+            "header missing 'flipper-tui' in snapshot:\n{text}"
+        );
+        // Hardware panel rows: each row has the key on the left and the
+        // value padded by `push_field`. Assert the key and value
+        // separately because the rendered buffer has multiple spaces
+        // between them (col-style padding), not a single space.
+        assert!(
+            text.contains("Hardware"),
+            "hardware panel missing 'Hardware' key in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("f7"),
+            "hardware panel missing 'f7' value in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("Revision"),
+            "hardware panel missing 'Revision' key in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("R3llow4n"),
+            "hardware panel missing 'R3llow4n' value in snapshot:\n{text}"
+        );
+        // Radio panel: YES flags + BLE MAC.
+        assert!(
+            text.contains("Sub-GHz"),
+            "radio panel missing 'Sub-GHz' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("YES"),
+            "radio panel missing 'YES' for any radio in snapshot:\n{text}"
+        );
+        // Footer hotkeys (the dashboard keymap lander).
+        assert!(
+            text.contains("storage"),
+            "footer missing 'storage' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("updates"),
+            "footer missing 'updates' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("settings"),
+            "footer missing 'settings' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("help"),
+            "footer missing 'help' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("quit"),
+            "footer missing 'quit' in snapshot:\n{text}"
+        );
     }
 }

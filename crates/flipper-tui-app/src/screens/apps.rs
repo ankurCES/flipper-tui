@@ -161,4 +161,124 @@ mod tests {
         assert!(entries.is_empty());
         assert_eq!(Apps::root().path, "/ext/apps");
     }
+
+    #[test]
+    fn snapshot_apps_with_entries() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::ListState;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let apps = Apps::new();
+        let location = Apps::root();
+        let entries = vec![
+            StorageEntry {
+                name: "nfc_reader".to_string(),
+                is_dir: true,
+                size: 0,
+            },
+            StorageEntry {
+                name: "subghz_remote".to_string(),
+                is_dir: true,
+                size: 0,
+            },
+        ];
+        let mut state = ListState::default();
+        state.select(Some(0));
+        terminal
+            .draw(|f| apps.render(f, Rect::new(0, 0, 80, 24), &location, &entries, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Header + apps title + path.
+        assert!(
+            text.contains("flipper-tui"),
+            "missing 'flipper-tui':\n{text}"
+        );
+        assert!(text.contains("apps"), "missing 'apps' header:\n{text}");
+        assert!(
+            text.contains("/ext/apps"),
+            "missing '/ext/apps' path line:\n{text}"
+        );
+        // Each app dir is listed as `[D] <name>`.
+        assert!(
+            text.contains("[D]"),
+            "missing '[D]' flag for app dirs:\n{text}"
+        );
+        assert!(
+            text.contains("nfc_reader"),
+            "missing 'nfc_reader' row:\n{text}"
+        );
+        assert!(
+            text.contains("subghz_remote"),
+            "missing 'subghz_remote' row:\n{text}"
+        );
+        // Footer hotkeys.
+        assert!(text.contains("open"), "footer missing 'open':\n{text}");
+        assert!(text.contains("back"), "footer missing 'back':\n{text}");
+        assert!(
+            text.contains("refresh"),
+            "footer missing 'refresh':\n{text}"
+        );
+    }
+
+    #[test]
+    fn snapshot_apps_empty() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::ListState;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let apps = Apps::new();
+        let location = Apps::root();
+        let entries: Vec<StorageEntry> = vec![];
+        let mut state = ListState::default();
+        terminal
+            .draw(|f| apps.render(f, Rect::new(0, 0, 80, 24), &location, &entries, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // The empty-state hint is a literal string in the source.
+        assert!(
+            text.contains("no apps installed"),
+            "missing 'no apps installed' empty-state hint:\n{text}"
+        );
+        // Path is still shown so users see what was scanned.
+        assert!(
+            text.contains("/ext/apps"),
+            "missing '/ext/apps' path:\n{text}"
+        );
+    }
 }

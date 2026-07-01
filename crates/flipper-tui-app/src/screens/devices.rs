@@ -81,12 +81,98 @@ impl Default for Devices {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::widgets::ListState;
+    use ratatui::Terminal;
+
+    fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+        let mut out = String::with_capacity(area.width as usize * area.height as usize);
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                let cell = &buf[(x, y)];
+                let mut chars = cell.symbol().chars();
+                out.push(chars.next().unwrap_or(' '));
+                let _ = chars.next();
+            }
+        }
+        out
+    }
 
     #[test]
-    fn empty_endpoint_list_doesnt_panic() {
-        // Smoke check: building the view with no devices compiles and
-        // can be held without panicking. Full render testing needs a
-        // TestBackend — left for the integration harness.
-        let _ = Devices::new();
+    fn snapshot_devices_empty() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let devices = Devices::new();
+        let endpoints: Vec<String> = vec![];
+        let mut state = ListState::default();
+        terminal
+            .draw(|f| devices.render(f, Rect::new(0, 0, 80, 24), &endpoints, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Header + panel title.
+        assert!(
+            text.contains("flipper-tui"),
+            "missing 'flipper-tui':\n{text}"
+        );
+        assert!(
+            text.contains("devices"),
+            "missing 'devices' header:\n{text}"
+        );
+        assert!(
+            text.contains("detected"),
+            "missing 'detected' panel title:\n{text}"
+        );
+        // Empty-state hint is the exact string from the source.
+        assert!(
+            text.contains("no Flipper detected on USB"),
+            "missing empty-state hint:\n{text}"
+        );
+        // Footer hotkeys.
+        assert!(
+            text.contains("connect"),
+            "footer missing 'connect':\n{text}"
+        );
+        assert!(text.contains("rescan"), "footer missing 'rescan':\n{text}");
+        assert!(text.contains("help"), "footer missing 'help':\n{text}");
+        assert!(text.contains("quit"), "footer missing 'quit':\n{text}");
+    }
+
+    #[test]
+    fn snapshot_devices_with_endpoints() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let devices = Devices::new();
+        let endpoints = vec![
+            "/dev/tty.usbmodemflip_R3llow4n1".to_string(),
+            "/dev/cu.usbmodemflip_R3llow4n1".to_string(),
+        ];
+        let mut state = ListState::default();
+        state.select(Some(0));
+        terminal
+            .draw(|f| devices.render(f, Rect::new(0, 0, 80, 24), &endpoints, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        assert!(
+            text.contains("flipper-tui"),
+            "missing 'flipper-tui':\n{text}"
+        );
+        assert!(
+            text.contains("detected"),
+            "missing 'detected' panel title:\n{text}"
+        );
+        // One endpoint per line must be present in the rendered buffer.
+        assert!(
+            text.contains("/dev/tty.usbmodemflip_R3llow4n1"),
+            "missing first endpoint line:\n{text}"
+        );
+        assert!(
+            text.contains("/dev/cu.usbmodemflip_R3llow4n1"),
+            "missing second endpoint line:\n{text}"
+        );
     }
 }

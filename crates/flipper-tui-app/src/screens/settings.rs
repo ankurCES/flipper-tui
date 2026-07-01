@@ -214,28 +214,124 @@ mod tests {
     }
 
     #[test]
-    fn settings_holds_without_panicking() {
-        let _ = Settings::new();
+    fn snapshot_settings_with_storage() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let settings = Settings::new();
+        let info = sample_info();
+        let storage = sample_storage();
+        terminal
+            .draw(|f| settings.render(f, Rect::new(0, 0, 80, 24), &info, Some(&storage)))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Header + both panel titles.
+        assert!(
+            text.contains("flipper-tui"),
+            "missing 'flipper-tui':\n{text}"
+        );
+        assert!(
+            text.contains("settings"),
+            "missing 'settings' header:\n{text}"
+        );
+        assert!(
+            text.contains("device"),
+            "missing 'device' panel title:\n{text}"
+        );
+        assert!(
+            text.contains("storage"),
+            "missing 'storage' panel title:\n{text}"
+        );
+        // Device panel rows. Note: the Settings panel uses
+        // `Name` as the first row key (not `Hardware` — that's
+        // reserved for the Dashboard screen) followed by Revision,
+        // Region, Lot, Serial, Firmware family, then API/Boot/
+        // Flash family.
+        assert!(
+            text.contains("Name"),
+            "missing 'Name' row in device panel:\n{text}"
+        );
+        assert!(
+            text.contains("Revision"),
+            "missing 'Revision' row in device panel:\n{text}"
+        );
+        assert!(
+            text.contains("R3llow4n"),
+            "missing 'R3llow4n' value in device panel:\n{text}"
+        );
+        assert!(text.contains("API"), "missing 'API' row:\n{text}");
+        assert!(text.contains("87.1"), "missing API '87.1':\n{text}");
+        // Storage panel rows (since Some is passed).
+        assert!(text.contains("Label"), "missing 'Label' row:\n{text}");
+        assert!(text.contains("FLIPPER"), "missing 'FLIPPER' label:\n{text}");
+        assert!(text.contains("Total"), "missing 'Total' row:\n{text}");
+        // Footer.
+        assert!(
+            text.contains("refresh"),
+            "footer missing 'refresh':\n{text}"
+        );
+        assert!(text.contains("back"), "footer missing 'back':\n{text}");
+        assert!(text.contains("quit"), "footer missing 'quit':\n{text}");
     }
 
     #[test]
-    fn settings_renders_with_full_storage() {
-        // Smoke check: rendering with both panels populated reaches
-        // the render path. Full visual coverage is the snapshot
-        // suite (M5f).
-        let _info = sample_info();
-        let _storage = sample_storage();
-    }
+    fn snapshot_settings_without_storage() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::Terminal;
 
-    #[test]
-    fn settings_renders_without_storage() {
-        // When the live fetch fails we still want a usable screen —
-        // the storage panel falls back to a "try `r`" hint.
-        let _info = sample_info();
-        let storage: Option<StorageInfo> = None;
-        assert!(storage.is_none());
-    }
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
 
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let settings = Settings::new();
+        let info = sample_info();
+        terminal
+            .draw(|f| settings.render(f, Rect::new(0, 0, 80, 24), &info, None))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Storage panel falls back to this exact literal hint.
+        assert!(
+            text.contains("storage info unavailable"),
+            "missing fallback hint 'storage info unavailable':\n{text}"
+        );
+        // Footer still present.
+        assert!(
+            text.contains("refresh"),
+            "footer missing 'refresh' in fallback state:\n{text}"
+        );
+    }
     #[test]
     fn human_bytes_renders_known_units() {
         assert_eq!(human_bytes(0), "0 B");

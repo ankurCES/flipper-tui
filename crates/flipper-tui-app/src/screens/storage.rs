@@ -171,12 +171,129 @@ mod tests {
     use super::*;
 
     #[test]
-    fn storage_holds_without_panicking() {
-        // Smoke check: the view type compiles and is constructable.
-        // Full render testing needs a TestBackend — left for the
-        // snapshot suite.
-        let _ = Storage::new();
+    fn snapshot_storage_root_with_entries() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::ListState;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let storage = Storage::new();
+        let location = StorageLocation::root();
+        let entries = vec![
+            StorageEntry {
+                name: "apps".to_string(),
+                is_dir: true,
+                size: 0,
+            },
+            StorageEntry {
+                name: "Manifest".to_string(),
+                is_dir: false,
+                size: 4096,
+            },
+        ];
+        let mut state = ListState::default();
+        state.select(Some(0));
+        terminal
+            .draw(|f| storage.render(f, Rect::new(0, 0, 80, 24), &location, &entries, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Header + panel title + path.
+        assert!(
+            text.contains("flipper-tui"),
+            "missing 'flipper-tui':\n{text}"
+        );
+        assert!(
+            text.contains("storage"),
+            "missing 'storage' header:\n{text}"
+        );
+        assert!(text.contains("/ext"), "missing '/ext' path line:\n{text}");
+        assert!(
+            text.contains("contents"),
+            "missing 'contents' panel title:\n{text}"
+        );
+        // Directory row uses [D] flag.
+        assert!(
+            text.contains("[D]"),
+            "missing '[D]' flag in entries:\n{text}"
+        );
+        assert!(text.contains("apps"), "missing 'apps' row:\n{text}");
+        // File row uses [F] flag and a human-readable size.
+        assert!(
+            text.contains("[F]"),
+            "missing '[F]' flag for files:\n{text}"
+        );
+        assert!(text.contains("Manifest"), "missing 'Manifest' row:\n{text}");
+        assert!(text.contains("4 KiB"), "missing size '4 KiB':\n{text}");
+        // Footer hotkeys.
+        assert!(text.contains("open"), "footer missing 'open':\n{text}");
+        assert!(text.contains("back"), "footer missing 'back':\n{text}");
+        assert!(
+            text.contains("refresh"),
+            "footer missing 'refresh':\n{text}"
+        );
     }
+
+    #[test]
+    fn snapshot_storage_empty() {
+        use ratatui::backend::TestBackend;
+        use ratatui::layout::Rect;
+        use ratatui::widgets::ListState;
+        use ratatui::Terminal;
+
+        fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+            let mut out = String::with_capacity(area.width as usize * area.height as usize);
+            for y in area.y..area.y + area.height {
+                for x in area.x..area.x + area.width {
+                    let cell = &buf[(x, y)];
+                    let mut chars = cell.symbol().chars();
+                    out.push(chars.next().unwrap_or(' '));
+                    let _ = chars.next();
+                }
+            }
+            out
+        }
+
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let storage = Storage::new();
+        let location = StorageLocation {
+            path: "/ext/lol_no_such_dir".to_string(),
+        };
+        let entries: Vec<StorageEntry> = vec![];
+        let mut state = ListState::default();
+        terminal
+            .draw(|f| storage.render(f, Rect::new(0, 0, 80, 24), &location, &entries, &mut state))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        assert!(
+            text.contains("empty directory"),
+            "missing empty-state hint:\n{text}"
+        );
+    }
+
+    // ---- Behavior tests for StorageLocation::descend / ascend / human_size ----
+    // These were originally added in M5a and are restored here after the
+    // snapshot-test rewrite accidentally dropped them. The snapshot tests
+    // cover the render path; these tests cover the pure path-string logic.
 
     #[test]
     fn descend_appends_with_single_slash() {

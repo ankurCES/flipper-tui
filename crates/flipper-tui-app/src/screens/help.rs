@@ -74,3 +74,70 @@ impl Default for Help {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
+    use ratatui::Terminal;
+
+    fn collect_text(buf: &ratatui::buffer::Buffer, area: Rect) -> String {
+        let mut out = String::with_capacity(area.width as usize * area.height as usize);
+        for y in area.y..area.y + area.height {
+            for x in area.x..area.x + area.width {
+                let cell = &buf[(x, y)];
+                let mut chars = cell.symbol().chars();
+                out.push(chars.next().unwrap_or(' '));
+                let _ = chars.next();
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn snapshot_help() {
+        let backend = TestBackend::new(80, 24);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let help = Help::new();
+        terminal
+            .draw(|f| help.render(f, Rect::new(0, 0, 80, 24)))
+            .unwrap();
+        let buf = terminal.backend().buffer().clone();
+        let text = collect_text(&buf, Rect::new(0, 0, 80, 24));
+
+        // Header + body title.
+        assert!(
+            text.contains("flipper-tui"),
+            "header missing 'flipper-tui' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("help"),
+            "title missing 'help' in snapshot:\n{text}"
+        );
+
+        // Section headings.
+        assert!(
+            text.contains("Navigation"),
+            "section missing 'Navigation' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("Global"),
+            "section missing 'Global' in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("Dashboard tabs"),
+            "section missing 'Dashboard tabs' in snapshot:\n{text}"
+        );
+
+        // At least one of the documented bindings must be present.
+        assert!(
+            text.contains("cycle focus"),
+            "binding 'cycle focus' missing in snapshot:\n{text}"
+        );
+        assert!(
+            text.contains("back / cancel"),
+            "binding 'back / cancel' missing in snapshot:\n{text}"
+        );
+    }
+}
