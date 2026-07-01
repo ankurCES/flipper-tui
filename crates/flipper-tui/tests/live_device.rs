@@ -26,7 +26,7 @@
 //! pyflipper-style safety rules: no destructive radio / storage /
 //! power / input ops — read-only verbs only.
 
-use flipper_core::read_file;
+use flipper_core::{info, read_file};
 use flipper_transport::{SerialTransport, Transport};
 
 /// Path to the live Flipper endpoint. Defaults to the macOS-friendly
@@ -131,5 +131,60 @@ async fn live_storage_stat_ext_round_trips() {
         "expected non-trivial storage stat reply, got {} bytes",
         raw.response.len()
     );
+    tx.disconnect().await.ok();
+}
+
+/// `Transport::ping` round-trips against the live Momentum firmware.
+/// The default impl sends an empty line and expects any bytes back;
+/// the bridge's boot banner satisfies this on the first call.
+#[tokio::test]
+#[ignore = "requires FLIPPER_TUI_DEVICE pointing at a real Flipper"]
+async fn live_ping_round_trips() {
+    let path = endpoint();
+    let tx = SerialTransport::new(path, 115_200);
+    tx.connect().await.expect("connect");
+    tx.ping().await.expect("ping");
+    tx.disconnect().await.ok();
+}
+
+/// `info()` parses the live boot banner for the firmware version line.
+/// Real Momentum evidence: `mntm-012 mntm-012 (e1784e74 built on 31-12-2025)`.
+///
+/// The Momentum ASCII CLI bridge delays the boot banner emission by
+/// ~5-8s after the first real command on a fresh connection — far
+/// longer than any reasonable `send()` idle gap can wait, and the
+/// bridge treats `\n` (used by `ping()`) as a no-op that doesn't
+/// flush the banner. The TUI's real usage pattern is: the Devices
+/// screen calls `device_info` during device detection (which triggers
+/// the banner emission as a side effect), then the Dashboard screen
+/// calls `info()` to display the firmware version. By the time
+/// `info()` runs, the banner is already in the device's output buffer
+/// and the next `send("device_info")` reply includes it.
+///
+/// This test mirrors that pattern: warm up the bridge with a
+/// `device_info` call (which triggers banner emission), then call
+/// `info()`. The name is prefixed `aaa_` so it sorts first among the
+/// live tests, preserving the "info runs early in the TUI lifecycle"
+/// intent.
+#[tokio::test]
+#[ignore = "requires FLIPPER_TUI_DEVICE pointing at a real Flipper"]
+async fn live_aaa_info_parses_first_after_connect() {
+    let path = endpoint();
+    let tx = SerialTransport::new(path, 115_200);
+    tx.connect().await.expect("connect");
+    // Warm up the bridge with a real command — `ping()` sends `\n`
+    // which the bridge treats as a no-op and doesn't flush the
+    // banner. `device_info` triggers the full banner emission.
+    tx.send("device_info", &[])
+        .await
+        .expect("warm-up device_info");
+    let parsed = info(&tx).await.expect("info");
+    println!(
+        "live info: branch={} commit={} build_date={}",
+        parsed.firmware_branch, parsed.firmware_commit, parsed.firmware_build_date
+    );
+    assert_eq!(parsed.firmware_branch, "mntm-012");
+    assert_eq!(parsed.firmware_commit, "e1784e74");
+    assert_eq!(parsed.firmware_build_date, "31-12-2025");
     tx.disconnect().await.ok();
 }

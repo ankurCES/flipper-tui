@@ -140,4 +140,23 @@ mod tests {
         let err = tx.send("nope", &[]).await.unwrap_err();
         assert!(matches!(err, TransportError::MockUnhandled(_)));
     }
+
+    #[tokio::test]
+    async fn ping_succeeds_when_device_replies_with_bytes() {
+        let tx = MockTransport::new();
+        tx.on("", |_args| CommandResult::ok(b"any-bytes".to_vec()));
+        tx.connect().await.unwrap();
+        // Default `Transport::ping` impl sends an empty line and checks
+        // the reply is non-empty.
+        tx.ping().await.expect("ping should succeed");
+    }
+
+    #[tokio::test]
+    async fn ping_errors_when_device_returns_empty_reply() {
+        let tx = MockTransport::new();
+        tx.on("", |_args| CommandResult::ok(b"".to_vec()));
+        tx.connect().await.unwrap();
+        let err = tx.ping().await.unwrap_err();
+        assert!(matches!(err, TransportError::Io(_)));
+    }
 }

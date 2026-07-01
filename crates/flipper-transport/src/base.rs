@@ -59,4 +59,24 @@ pub trait Transport: Send + Sync {
 
     /// Send a single command and await its reply.
     async fn send(&self, command: &str, args: &[&str]) -> Result<CommandResult, TransportError>;
+
+    /// Lightweight liveness check. Default impl sends an empty line and
+    /// returns Ok iff the device produced any bytes. Override for
+    /// transports that have a cheaper way to detect liveness.
+    async fn ping(&self) -> Result<(), TransportError> {
+        let r = self.send("", &[]).await?;
+        if r.response.is_empty() {
+            Err(TransportError::Io("ping: empty reply".into()))
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Boot banner captured during `connect`, if any. Real serial
+    /// transports drain the firmware's boot banner into a buffer so
+    /// `info()` and the dashboard can read it after the first command
+    /// has consumed the banner from the wire. Mocks return `None`.
+    async fn boot_banner(&self) -> Option<Bytes> {
+        None
+    }
 }
