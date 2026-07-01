@@ -65,14 +65,19 @@ enum Cmd {
 
 #[derive(Debug, Subcommand)]
 enum StorageCmd {
+    /// List the contents of a directory on the Flipper.
     List { path: String },
+    /// Read a file from the Flipper and print it to stdout.
     Read { path: String },
+    /// Print metadata (size, type) for a file or directory.
     Stat { path: String },
+    /// Create a directory on the Flipper (asks for confirmation first).
     Mkdir { path: String },
 }
 
 #[derive(Debug, Subcommand)]
 enum UpdateCmd {
+    /// Query the firmware update channel and print the result.
     Check,
 }
 
