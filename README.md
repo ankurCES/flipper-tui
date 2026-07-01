@@ -34,8 +34,31 @@ GPL-3.0-or-later, derived from qFlipper.
 
 ## Install
 
+### One line (macOS, Linux, WSL)
+
 ```bash
-cargo install --git https://github.com/ankurCES/flipper-tui
+curl -fsSL https://raw.githubusercontent.com/ankurCES/flipper-tui/main/scripts/install.sh | bash
+```
+
+Windows + PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/ankurCES/flipper-tui/main/scripts/install.ps1 | iex
+```
+
+The script installs Rust via `rustup` if `cargo` isn't already on `$PATH`,
+then `cargo install --git https://github.com/ankurCES/flipper-tui --locked`,
+and verifies both `flipper-tui` and `flipper-tui-cli` are on `$PATH` with a
+`--version` smoke test. See [`scripts/README.md`](scripts/README.md) for
+override flags (`FLIPPER_TUI_REF`, `FLIPPER_TUI_REPO`, `FLIPPER_TUI_NO_RUSTUP`)
+and the same details for Windows.
+
+### Manual
+
+If you'd rather drive `cargo` yourself:
+
+```bash
+cargo install --git https://github.com/ankurCES/flipper-tui --locked
 # exposes both `flipper-tui` and `flipper-tui-cli` on $PATH
 ```
 
