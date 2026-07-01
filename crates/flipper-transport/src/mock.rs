@@ -1,6 +1,6 @@
 //! In-memory mock transport for tests and offline TUI runs.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
@@ -8,7 +8,7 @@ use bytes::Bytes;
 
 use crate::base::{CommandResult, Transport, TransportError};
 
-type Handler = Box<dyn Fn(&[&str]) -> CommandResult + Send + Sync>;
+type Handler = Arc<dyn Fn(&[&str]) -> CommandResult + Send + Sync>;
 
 /// One entry in [`MockTransport::call_log`]: the command name and the
 /// owned arg vector as captured at call time.
@@ -19,6 +19,9 @@ pub type CallRecord = (String, Vec<String>);
 #[derive(Default, Clone)]
 pub struct MockTransport {
     handlers: Arc<Mutex<HashMap<String, Handler>>>,
+    /// Commands registered with [`MockTransport::one_shot`]. The
+    /// handler is removed after its first invocation.
+    one_shot: Arc<Mutex<HashSet<String>>>,
     connected: Arc<Mutex<bool>>,
     log: Arc<Mutex<Vec<CallRecord>>>,
 }
@@ -28,7 +31,11 @@ impl MockTransport {
         Self::default()
     }
 
-    /// Register a handler for a single command name.
+    /// Register a persistent handler for a command name. Unlike
+    /// [`MockTransport::one_shot`], handlers registered with `on`
+    /// fire every time the command is sent — which is what the
+    /// offline TUI needs (the event loop re-issues `storage list`
+    /// and `storage info` on every screen refresh).
     ///
     /// ```ignore
     /// let tx = MockTransport::new();
@@ -41,7 +48,24 @@ impl MockTransport {
         self.handlers
             .lock()
             .expect("mock handlers poisoned")
-            .insert(command.to_string(), Box::new(handler));
+            .insert(command.to_string(), Arc::new(handler));
+    }
+
+    /// Register a one-shot handler. The handler fires on the next
+    /// matching `send` and is then removed. Useful in unit tests
+    /// that want to assert "the call happened exactly once".
+    pub fn one_shot<F>(&self, command: &str, handler: F)
+    where
+        F: Fn(&[&str]) -> CommandResult + Send + Sync + 'static,
+    {
+        self.handlers
+            .lock()
+            .expect("mock handlers poisoned")
+            .insert(command.to_string(), Arc::new(handler));
+        self.one_shot
+            .lock()
+            .expect("mock one_shot poisoned")
+            .insert(command.to_string());
     }
 
     /// Returns every command this transport has received, in order.
@@ -85,11 +109,33 @@ impl Transport for MockTransport {
             .lock()
             .expect("mock log poisoned")
             .push((command.to_string(), owned_args));
-        let handler = self
-            .handlers
-            .lock()
-            .expect("mock handlers poisoned")
-            .remove(command);
+        // `on` is persistent: clone the handler and leave it in place
+        // so subsequent calls to the same command still fire.
+        // `one_shot` removes after invocation. This split is what the
+        // offline TUI depends on — the event loop re-issues
+        // `storage list /ext` and `storage info /ext` on every screen
+        // refresh, and the old `remove()` semantics silently broke
+        // every refresh after the first.
+        let (handler, was_one_shot) = {
+            let mut map = self.handlers.lock().expect("mock handlers poisoned");
+            let is_one_shot = self
+                .one_shot
+                .lock()
+                .expect("mock one_shot poisoned")
+                .contains(command);
+            let handler = if is_one_shot {
+                map.remove(command)
+            } else {
+                map.get(command).map(Arc::clone)
+            };
+            (handler, is_one_shot)
+        };
+        if was_one_shot {
+            self.one_shot
+                .lock()
+                .expect("mock one_shot poisoned")
+                .remove(command);
+        }
         match handler {
             Some(h) => Ok(h(args)),
             None => Err(TransportError::MockUnhandled(command.to_string())),

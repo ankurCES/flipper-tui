@@ -212,11 +212,14 @@ impl State {
                 // Storage, Apps). Mirrors qFlipper's global `?` binding.
                 self.screen = Screen::Help;
             }
-            (KeyCode::Esc, Screen::Dashboard) => self.screen = Screen::Devices,
-            (KeyCode::Esc, Screen::Storage) => {
-                // Pop one dir component if we can, otherwise fall back
-                // to the Dashboard (qFlipper's FileManager "back"
-                // gesture takes you to the previous screen at root).
+            // vim-style left/back. `h` / `Left` from Dashboard → Devices,
+            // from any nested screen → parent (storage/apps pop, or back
+            // to Dashboard at root). Same action as `Esc`, so we share
+            // the arm.
+            (KeyCode::Char('h') | KeyCode::Left, Screen::Dashboard) => {
+                self.screen = Screen::Devices;
+            }
+            (KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left, Screen::Storage) => {
                 if let Some(parent) = self.storage_location.ascend() {
                     self.storage_location = parent;
                     self.storage_dirty = true;
@@ -224,7 +227,7 @@ impl State {
                     self.screen = Screen::Dashboard;
                 }
             }
-            (KeyCode::Esc, Screen::Apps) => {
+            (KeyCode::Esc | KeyCode::Char('h') | KeyCode::Left, Screen::Apps) => {
                 if let Some(parent) = self.apps_location.ascend() {
                     self.apps_location = parent;
                     self.apps_dirty = true;
@@ -232,7 +235,88 @@ impl State {
                     self.screen = Screen::Dashboard;
                 }
             }
-
+            // vim-style right/forward. `l` / `Right` activates the
+            // selected entry on a list screen (same as `Enter`),
+            // or moves Devices → Dashboard.
+            (KeyCode::Char('l') | KeyCode::Right, Screen::Devices) => {
+                if self.devices.is_empty() {
+                    self.devices = flipper_transport::detect_devices()
+                        .into_iter()
+                        .map(|d| d.path)
+                        .collect();
+                }
+                self.screen = Screen::Dashboard;
+            }
+            (KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right, Screen::Storage) => {
+                if let Some(idx) = self.list.selected() {
+                    if let Some(entry) = self.storage_entries.get(idx) {
+                        if entry.is_dir {
+                            self.storage_location = self.storage_location.descend(&entry.name);
+                            self.storage_dirty = true;
+                        }
+                    }
+                }
+            }
+            (KeyCode::Enter | KeyCode::Char('l') | KeyCode::Right, Screen::Apps) => {
+                if let Some(idx) = self.list.selected() {
+                    if let Some(entry) = self.apps_entries.get(idx) {
+                        if entry.is_dir {
+                            self.apps_location = self.apps_location.descend(&entry.name);
+                            self.apps_dirty = true;
+                        }
+                    }
+                }
+            }
+            // vim-style up/down + arrow keys. Drives the ListState
+            // on the storage / apps / devices list screens. Skips
+            // the Dashboard which has no list selection.
+            (KeyCode::Char('j') | KeyCode::Down, Screen::Devices) => {
+                let len = self.devices.len();
+                if len > 0 {
+                    let i = self.list.selected().map_or(0, |i| (i + 1) % len);
+                    self.list.select(Some(i));
+                }
+            }
+            (KeyCode::Char('k') | KeyCode::Up, Screen::Devices) => {
+                let len = self.devices.len();
+                if len > 0 {
+                    let i = self.list.selected().map_or(0, |i| (i + len - 1) % len);
+                    self.list.select(Some(i));
+                }
+            }
+            (KeyCode::Char('j') | KeyCode::Down, Screen::Storage) => {
+                let len = self.storage_entries.len();
+                if len > 0 {
+                    let i = self.list.selected().map_or(0, |i| (i + 1) % len);
+                    self.list.select(Some(i));
+                }
+            }
+            (KeyCode::Char('k') | KeyCode::Up, Screen::Storage) => {
+                let len = self.storage_entries.len();
+                if len > 0 {
+                    let i = self.list.selected().map_or(0, |i| (i + len - 1) % len);
+                    self.list.select(Some(i));
+                }
+            }
+            (KeyCode::Char('j') | KeyCode::Down, Screen::Apps) => {
+                let len = self.apps_entries.len();
+                if len > 0 {
+                    let i = self.list.selected().map_or(0, |i| (i + 1) % len);
+                    self.list.select(Some(i));
+                }
+            }
+            (KeyCode::Char('k') | KeyCode::Up, Screen::Apps) => {
+                let len = self.apps_entries.len();
+                if len > 0 {
+                    let i = self.list.selected().map_or(0, |i| (i + len - 1) % len);
+                    self.list.select(Some(i));
+                }
+            }
+            (KeyCode::Esc, Screen::Dashboard) => self.screen = Screen::Devices,
+            // Note: Esc on Storage/Apps is handled above in the
+            // `Esc | h | Left` arms. Enter on Storage/Apps is handled
+            // above in the `Enter | l | Right` arms. Listing them
+            // again here would be unreachable.
             (KeyCode::Char('s'), Screen::Dashboard) => {
                 self.screen = Screen::Storage;
                 self.storage_location = StorageLocation::root();
@@ -257,28 +341,6 @@ impl State {
                 self.updates_dirty = true;
             }
 
-            (KeyCode::Enter, Screen::Storage) => {
-                if let Some(idx) = self.list.selected() {
-                    if let Some(entry) = self.storage_entries.get(idx) {
-                        if entry.is_dir {
-                            self.storage_location = self.storage_location.descend(&entry.name);
-                            self.storage_dirty = true;
-                        }
-                        // Files: v0.1 is display-only, do nothing.
-                    }
-                }
-            }
-            (KeyCode::Enter, Screen::Apps) => {
-                if let Some(idx) = self.list.selected() {
-                    if let Some(entry) = self.apps_entries.get(idx) {
-                        if entry.is_dir {
-                            self.apps_location = self.apps_location.descend(&entry.name);
-                            self.apps_dirty = true;
-                        }
-                        // Files: v0.1 is display-only, do nothing.
-                    }
-                }
-            }
             (KeyCode::Char('r'), Screen::Devices) => {
                 self.devices = flipper_transport::detect_devices()
                     .into_iter()
@@ -407,5 +469,115 @@ mod tests {
             !s.updates_dirty,
             "Updates check only fires when the user opens the screen"
         );
+    }
+
+    /// End-to-end proof that every screen in the app paints content
+    /// via [`TestBackend`]. Catches the "TUI is blank" regression class:
+    /// if [`State::render`] ever returns `Ok()` but draws an empty buffer
+    /// (e.g. terminal teardown before first draw, or all screens
+    /// short-circuiting), this test fails.
+    #[test]
+    fn render_every_screen_produces_nonblank_buffer() {
+        use ratatui::backend::TestBackend;
+        use ratatui::Terminal;
+
+        fn buffer_text(buf: &ratatui::buffer::Buffer) -> String {
+            buf.content
+                .iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                .trim_end_matches('\0')
+                .to_string()
+        }
+
+        fn make_info() -> flipper_core::DeviceInfo {
+            flipper_core::DeviceInfo {
+                hardware: flipper_core::HardwareInfo {
+                    name: "f7".into(),
+                    revision: "R3llow4n".into(),
+                    region: "US".into(),
+                    lot: "2024-Q3-19".into(),
+                },
+                firmware_branch: "mntm-012".into(),
+                firmware_version: "Momentum v1.4.4 OCT 2024".into(),
+                firmware_build: "4106".into(),
+                firmware_target: "f7".into(),
+                radio: flipper_core::RadioInfo {
+                    ble_mac: "AA:BB:CC:DD:EE:FF".into(),
+                    subghz: true,
+                    nfc: true,
+                    ir: true,
+                },
+                flash: flipper_core::FlashInfo {
+                    vendor: "Winbond".into(),
+                    model: "W25Q128".into(),
+                    size_bytes: 16384,
+                },
+                api_major: 87,
+                api_minor: 0,
+                boot_mode: flipper_core::BootMode::Normal,
+                serial: "flip_R3llow4n1".into(),
+            }
+        }
+
+        let mut state = State::new(make_info());
+        // Seed one entry per list screen so they have something to
+        // render — mirrors what `refresh_storage` would produce after
+        // a real `storage list /ext` round-trip.
+        state.storage_entries.push(flipper_core::StorageEntry {
+            name: "GPIO".into(),
+            is_dir: true,
+            size: 0,
+        });
+        state.apps_entries.push(flipper_core::StorageEntry {
+            name: "GPIO".into(),
+            is_dir: true,
+            size: 0,
+        });
+
+        let mut terminal = Terminal::new(TestBackend::new(80, 24)).unwrap();
+
+        // Devices is the boot screen.
+        state.screen = Screen::Devices;
+        state.render(&mut terminal).unwrap();
+        assert!(
+            !buffer_text(terminal.backend().buffer()).trim().is_empty(),
+            "Devices screen rendered blank — TUI regression"
+        );
+
+        // Dashboard is the home screen.
+        state.screen = Screen::Dashboard;
+        state.render(&mut terminal).unwrap();
+        assert!(
+            !buffer_text(terminal.backend().buffer()).trim().is_empty(),
+            "Dashboard screen rendered blank — TUI regression"
+        );
+
+        // Storage / Apps list with seeded entries.
+        state.screen = Screen::Storage;
+        state.render(&mut terminal).unwrap();
+        let storage_text = buffer_text(terminal.backend().buffer());
+        assert!(
+            storage_text.contains("GPIO"),
+            "Storage screen missing entry; rendered: {storage_text:?}"
+        );
+
+        state.screen = Screen::Apps;
+        state.render(&mut terminal).unwrap();
+        let apps_text = buffer_text(terminal.backend().buffer());
+        assert!(
+            apps_text.contains("GPIO"),
+            "Apps screen missing entry; rendered: {apps_text:?}"
+        );
+
+        // Remaining screens — each must paint something.
+        for screen in [Screen::Settings, Screen::Updates, Screen::Help] {
+            state.screen = screen;
+            state.render(&mut terminal).unwrap();
+            assert!(
+                !buffer_text(terminal.backend().buffer()).trim().is_empty(),
+                "{screen:?} screen rendered blank"
+            );
+        }
     }
 }
