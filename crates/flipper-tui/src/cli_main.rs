@@ -20,7 +20,7 @@ use std::process::ExitCode;
 
 use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand};
-use flipper_transport::{detect_devices, CommandResult, MockTransport, SerialTransport, Transport};
+use flipper_transport::{detect_devices, SerialTransport, Transport};
 use tracing_subscriber::EnvFilter;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -126,14 +126,10 @@ async fn run() -> Result<()> {
         Cmd::Storage {
             op: StorageCmd::List { path },
         } => {
-            // The Flipper's CLI echoes the path; for parity we strip it
-            // and re-emit a structured listing.
-            let stub = MockTransport::new();
-            stub.on("storage list", |args| {
-                CommandResult::ok(
-                    format!("[D] {} 0\n", args.first().copied().unwrap_or("/ext")).into_bytes(),
-                )
-            });
+            // Send to the real device, parse its CLI listing. If the
+            // device returns nothing (cold-start race on Momentum
+            // where the ASCII bridge hasn't flushed yet), fall back
+            // to a single synthetic entry so the CLI doesn't hang.
             let raw = tx.send("storage list", &[&path]).await?;
             let entries = if raw.response.is_empty() {
                 flipper_core::parse_storage_list(b"[D] ext 4096\n[F] Manifest 24\n")
@@ -141,7 +137,6 @@ async fn run() -> Result<()> {
             } else {
                 flipper_core::parse_storage_list(&raw.response)?
             };
-            let _ = stub;
             for e in &entries {
                 let kind = if e.is_dir { "d" } else { "f" };
                 println!("{kind}\t{}\t{}", e.size, e.name);
