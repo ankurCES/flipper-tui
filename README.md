@@ -49,9 +49,21 @@ irm https://raw.githubusercontent.com/ankurCES/flipper-tui/main/scripts/install.
 The script installs Rust via `rustup` if `cargo` isn't already on `$PATH`,
 then `cargo install --git https://github.com/ankurCES/flipper-tui --locked`,
 and verifies both `flipper-tui` and `flipper-tui-cli` are on `$PATH` with a
-`--version` smoke test. See [`scripts/README.md`](scripts/README.md) for
-override flags (`FLIPPER_TUI_REF`, `FLIPPER_TUI_REPO`, `FLIPPER_TUI_NO_RUSTUP`)
+`--version` smoke test.
+
+The installer resolves the default branch to a concrete commit SHA via
+`git ls-remote` before invoking cargo, and retries once on the transient
+`revspec '…' not found` race that can happen when the install runs
+within seconds of a fresh push. See [`scripts/README.md`](scripts/README.md)
+for override flags (`FLIPPER_TUI_REF`, `FLIPPER_TUI_REPO`, `FLIPPER_TUI_NO_RUSTUP`)
 and the same details for Windows.
+
+To force a specific commit SHA (e.g. if a CDN race hits you):
+
+```bash
+FLIPPER_TUI_REF=<commit-sha> \
+  curl -fsSL https://raw.githubusercontent.com/ankurCES/flipper-tui/main/scripts/install.sh | bash
+```
 
 ### Manual
 
