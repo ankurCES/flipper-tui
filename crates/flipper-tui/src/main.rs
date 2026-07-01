@@ -10,6 +10,7 @@
 use std::error::Error;
 use std::io::{stdout, Stdout};
 
+use clap::Parser;
 use crossterm::execute;
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -19,10 +20,35 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 use tracing_subscriber::EnvFilter;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Interactive TUI for the Flipper Zero — at-par with qFlipper.
+///
+/// On launch:
+///   1. Enumerate Flipper endpoints via `flipper_transport::detect_devices`.
+///   2. Open a `SerialTransport` to the first detected endpoint, fall back
+///      to `MockTransport` for offline demos.
+///   3. Send `device_info` to populate the dashboard.
+///   4. Hand off to `flipper_tui_app::run` which owns the event loop.
+#[derive(Debug, Parser)]
+#[command(name = "flipper-tui", version = VERSION, about = "Terminal UI for the Flipper Zero", long_about = None)]
+struct Cli {
+    /// Specific serial port to use (e.g. `/dev/tty.usbmodemflip_R3llow4n1`).
+    /// If omitted, the first detected endpoint is used.
+    #[arg(long)]
+    device: Option<String>,
+
+    /// Baud rate for the serial transport. Default: 115200.
+    #[arg(long, default_value_t = 115_200)]
+    baud: u32,
+}
+
 type Term = Terminal<CrosstermBackend<Stdout>>;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let cli = Cli::parse();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -31,17 +57,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     let mut terminal = setup_terminal()?;
-    let result = run(&mut terminal).await;
+    let result = run(&mut terminal, &cli).await;
     teardown_terminal(&mut terminal).ok();
     result
 }
 
-async fn run(terminal: &mut Term) -> Result<(), Box<dyn Error>> {
+async fn run(terminal: &mut Term, cli: &Cli) -> Result<(), Box<dyn Error>> {
     let endpoints = flipper_transport::detect_devices();
-    let chosen = endpoints.into_iter().next();
+    let chosen: Option<flipper_transport::DeviceEndpoint> = if let Some(path) = cli.device.as_ref()
+    {
+        endpoints.into_iter().find(|d| &d.path == path).or_else(|| {
+            // User-specified path not in the detected list — assume
+            // it's a Flipper and use the canonical STMicro VID with
+            // the normal-mode PID. The serial layer will surface a
+            // real error if it can't open.
+            Some(flipper_transport::DeviceEndpoint {
+                path: path.clone(),
+                vid: 0x0483,
+                pid: 0x5740,
+                label: None,
+            })
+        })
+    } else {
+        endpoints.into_iter().next()
+    };
 
     let mut tx: Box<dyn Transport> = if let Some(dev) = chosen {
-        let t = SerialTransport::new(dev.path.clone(), 115_200);
+        let t = SerialTransport::new(dev.path.clone(), cli.baud);
         t.connect()
             .await
             .map_err(|e| format!("connect serial: {e}"))?;
