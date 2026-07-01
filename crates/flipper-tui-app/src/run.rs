@@ -11,7 +11,8 @@ use ratatui::backend::Backend;
 use ratatui::widgets::ListState;
 use ratatui::Terminal;
 
-use crate::screens::{Apps, Dashboard, Devices, Help, Settings, Storage, StorageLocation};
+use crate::screens::{Apps, Dashboard, Devices, Help, Settings, Storage, StorageLocation, Updates};
+use flipper_core::{Info, UpdateStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -20,6 +21,7 @@ pub enum Screen {
     Storage,
     Apps,
     Settings,
+    Updates,
     Help,
 }
 
@@ -47,10 +49,27 @@ struct State {
     settings_storage: Option<flipper_core::StorageInfo>,
     /// True when Settings needs to re-fetch the volume snapshot.
     settings_dirty: bool,
+    /// Cached Updates screen state. v0.1 stays at
+    /// `UpdateState::NotSupported` because the Momentum ASCII CLI
+    /// bridge does not speak firmware-update RPC — the screen still
+    /// shows what's installed and exposes a `c`-key dry check.
+    updates: UpdateStatus,
+    /// True when the Updates panel needs a fresh `firmware update
+    /// check` round-trip. Drained at the bottom of `on_key`.
+    updates_dirty: bool,
 }
 
 impl State {
     fn new(info: DeviceInfo) -> Self {
+        let firmware = Info {
+            firmware_version: info.firmware_version.clone(),
+            firmware_branch: info.firmware_branch.clone(),
+            // The ASCII CLI bridge doesn't expose the firmware commit SHA
+            // through `device_info`; the Updates panel renders the branch
+            // + build-date so the user can still see what's installed.
+            firmware_commit: String::new(),
+            firmware_build_date: info.firmware_build.clone(),
+        };
         Self {
             screen: Screen::Devices,
             info,
@@ -64,6 +83,8 @@ impl State {
             apps_dirty: false,
             settings_storage: None,
             settings_dirty: true,
+            updates: UpdateStatus::unsupported(firmware),
+            updates_dirty: false,
         }
     }
 
@@ -95,6 +116,9 @@ impl State {
             }
             Screen::Settings => {
                 Settings::new().render(f, f.area(), &self.info, self.settings_storage.as_ref());
+            }
+            Screen::Updates => {
+                Updates::new().render(f, f.area(), &self.info, &self.updates);
             }
             Screen::Help => {
                 Help::new().render(f, f.area());
@@ -138,12 +162,49 @@ impl State {
         Ok(())
     }
 
+    /// Drain the updates dirty flag by issuing a `firmware update
+    /// check` to the bridge. v0.1 ignores the reply — the CLI bridge
+    /// does not speak update RPC — but the call gives the user
+    /// visible feedback that they pressed `c` and lets v0.2 swap
+    /// in protobuf RPC without changing the dispatch.
+    async fn refresh_updates<T: Transport + ?Sized>(
+        &mut self,
+        tx: &T,
+    ) -> Result<(), Box<dyn Error>> {
+        match flipper_core::check(tx).await {
+            Ok(state) => {
+                // Re-build `UpdateStatus` with the freshly fetched
+                // state. Branch/version/commit/build-date come from
+                // the cached `DeviceInfo` / boot-banner payload.
+                let firmware = Info {
+                    firmware_version: self.info.firmware_version.clone(),
+                    firmware_branch: self.info.firmware_branch.clone(),
+                    firmware_commit: String::new(),
+                    firmware_build_date: self.info.firmware_build.clone(),
+                };
+                self.updates = UpdateStatus::new(firmware, state);
+            }
+            Err(e) => {
+                let firmware = Info {
+                    firmware_version: self.info.firmware_version.clone(),
+                    firmware_branch: self.info.firmware_branch.clone(),
+                    firmware_commit: String::new(),
+                    firmware_build_date: self.info.firmware_build.clone(),
+                };
+                self.updates =
+                    UpdateStatus::new(firmware, flipper_core::UpdateState::Error(e.to_string()));
+            }
+        }
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_lines)]
     fn on_key<T: Transport + ?Sized>(&mut self, key: KeyEvent, tx: &mut T) {
         match (key.code, self.screen) {
             (KeyCode::Char('q'), _) => std::process::exit(0),
             (KeyCode::Char('?') | KeyCode::Esc, Screen::Help)
             | (KeyCode::Enter, Screen::Devices)
-            | (KeyCode::Esc, Screen::Settings) => {
+            | (KeyCode::Esc, Screen::Settings | Screen::Updates) => {
                 self.screen = Screen::Dashboard;
             }
             (KeyCode::Char('?'), _) => {
@@ -186,6 +247,15 @@ impl State {
                 self.screen = Screen::Settings;
                 self.settings_dirty = true;
             }
+            (KeyCode::Char('u'), Screen::Dashboard) => {
+                // v0.1: Updates screen is a scaffold — show installed
+                // metadata + a `c`-key check. The full install /
+                // restore / repair flow is pyflipper-safety-gated and
+                // lands in v0.2 once the protobuf RPC channel is
+                // wired up.
+                self.screen = Screen::Updates;
+                self.updates_dirty = true;
+            }
 
             (KeyCode::Enter, Screen::Storage) => {
                 if let Some(idx) = self.list.selected() {
@@ -224,6 +294,15 @@ impl State {
             (KeyCode::Char('r'), Screen::Settings) => {
                 self.settings_dirty = true;
             }
+            (KeyCode::Char('c'), Screen::Updates) => {
+                // qFlipper's check button mirrors `r` here — either
+                // re-runs `firmware update check`. v0.1 only renders
+                // the result; v0.2 will populate real state.
+                self.updates_dirty = true;
+            }
+            (KeyCode::Char('r'), Screen::Updates) => {
+                self.updates_dirty = true;
+            }
             _ => {}
         }
         // Drain dirty flags after each key event so the next loop
@@ -241,6 +320,10 @@ impl State {
         if self.settings_dirty {
             self.settings_dirty = false;
             let _ = futures::executor::block_on(self.refresh_settings(tx));
+        }
+        if self.updates_dirty {
+            self.updates_dirty = false;
+            let _ = futures::executor::block_on(self.refresh_updates(tx));
         }
     }
 }
@@ -307,5 +390,22 @@ mod tests {
         assert!(!s.apps_dirty);
         assert!(s.settings_storage.is_none());
         assert!(s.settings_dirty, "Settings should fetch on first paint");
+        // M5d: Updates screen is seeded with `NotSupported` because
+        // the Momentum ASCII CLI bridge doesn't speak update RPC.
+        // The dry check is opt-in (must be triggered by `u` / `c`).
+        assert_eq!(s.updates.installed.firmware_branch, "mntm-012");
+        assert_eq!(
+            s.updates.installed.firmware_version,
+            "Momentum v1.4.4 OCT 2024"
+        );
+        assert_eq!(
+            s.updates.state,
+            flipper_core::UpdateState::NotSupported,
+            "v0.1 starts on Updates panel with the scaffold state",
+        );
+        assert!(
+            !s.updates_dirty,
+            "Updates check only fires when the user opens the screen"
+        );
     }
 }

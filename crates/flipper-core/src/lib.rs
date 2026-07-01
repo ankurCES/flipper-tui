@@ -14,6 +14,7 @@ pub mod info;
 pub mod protocol;
 pub mod settings;
 pub mod storage;
+pub mod updates;
 
 pub use backup::{request_backup, BackupState, BackupStatus};
 pub use device::{BootMode, DeviceInfo, FlashInfo, HardwareInfo, RadioInfo};
@@ -22,3 +23,4 @@ pub use info::{info, Info};
 pub use protocol::{hello, parse_storage_list, read_file, stat, StorageEntry};
 pub use settings::{parse_storage_info, storage_info, StorageInfo};
 pub use storage::{mkdir, stat_file, write_file, FileStat, StatFlags};
+pub use updates::{check, UpdateState, UpdateStatus};
