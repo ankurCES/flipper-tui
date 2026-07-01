@@ -11,7 +11,7 @@ use ratatui::backend::Backend;
 use ratatui::widgets::ListState;
 use ratatui::Terminal;
 
-use crate::screens::{Apps, Dashboard, Devices, Help, Storage, StorageLocation};
+use crate::screens::{Apps, Dashboard, Devices, Help, Settings, Storage, StorageLocation};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Screen {
@@ -19,6 +19,7 @@ pub enum Screen {
     Dashboard,
     Storage,
     Apps,
+    Settings,
     Help,
 }
 
@@ -40,6 +41,12 @@ struct State {
     apps_location: StorageLocation,
     apps_entries: Vec<StorageEntry>,
     apps_dirty: bool,
+    /// Live snapshot of `storage info /ext` for the Settings panel.
+    /// `None` when the bridge hasn't responded yet or returned
+    /// empty (cold-start race on Momentum).
+    settings_storage: Option<flipper_core::StorageInfo>,
+    /// True when Settings needs to re-fetch the volume snapshot.
+    settings_dirty: bool,
 }
 
 impl State {
@@ -55,6 +62,8 @@ impl State {
             apps_location: Apps::root(),
             apps_entries: Vec::new(),
             apps_dirty: false,
+            settings_storage: None,
+            settings_dirty: true,
         }
     }
 
@@ -84,6 +93,9 @@ impl State {
                     &mut self.list,
                 );
             }
+            Screen::Settings => {
+                Settings::new().render(f, f.area(), &self.info, self.settings_storage.as_ref());
+            }
             Screen::Help => {
                 Help::new().render(f, f.area());
             }
@@ -110,10 +122,28 @@ impl State {
         Ok(())
     }
 
+    async fn refresh_settings<T: Transport + ?Sized>(
+        &mut self,
+        tx: &T,
+    ) -> Result<(), Box<dyn Error>> {
+        // Best-effort fetch — on cold-start the CLI bridge may echo
+        // the verb without a real payload, in which case we leave
+        // `settings_storage` at None so the screen falls back to its
+        // "try `r`" hint.
+        let result = tx.send("storage info", &["/ext"]).await?;
+        let text = std::str::from_utf8(&result.response).unwrap_or("");
+        if !text.trim().is_empty() {
+            self.settings_storage = Some(flipper_core::parse_storage_info(text, "/ext"));
+        }
+        Ok(())
+    }
+
     fn on_key<T: Transport + ?Sized>(&mut self, key: KeyEvent, tx: &mut T) {
         match (key.code, self.screen) {
             (KeyCode::Char('q'), _) => std::process::exit(0),
-            (KeyCode::Char('?') | KeyCode::Esc, Screen::Help) => {
+            (KeyCode::Char('?') | KeyCode::Esc, Screen::Help)
+            | (KeyCode::Enter, Screen::Devices)
+            | (KeyCode::Esc, Screen::Settings) => {
                 self.screen = Screen::Dashboard;
             }
             (KeyCode::Char('?'), _) => {
@@ -141,7 +171,7 @@ impl State {
                     self.screen = Screen::Dashboard;
                 }
             }
-            (KeyCode::Enter, Screen::Devices) => self.screen = Screen::Dashboard,
+
             (KeyCode::Char('s'), Screen::Dashboard) => {
                 self.screen = Screen::Storage;
                 self.storage_location = StorageLocation::root();
@@ -152,6 +182,11 @@ impl State {
                 self.apps_location = Apps::root();
                 self.apps_dirty = true;
             }
+            (KeyCode::Char('S'), Screen::Dashboard) => {
+                self.screen = Screen::Settings;
+                self.settings_dirty = true;
+            }
+
             (KeyCode::Enter, Screen::Storage) => {
                 if let Some(idx) = self.list.selected() {
                     if let Some(entry) = self.storage_entries.get(idx) {
@@ -186,6 +221,9 @@ impl State {
             (KeyCode::Char('r'), Screen::Apps) => {
                 self.apps_dirty = true;
             }
+            (KeyCode::Char('r'), Screen::Settings) => {
+                self.settings_dirty = true;
+            }
             _ => {}
         }
         // Drain dirty flags after each key event so the next loop
@@ -199,6 +237,10 @@ impl State {
         if self.apps_dirty {
             self.apps_dirty = false;
             let _ = futures::executor::block_on(self.refresh_apps(tx));
+        }
+        if self.settings_dirty {
+            self.settings_dirty = false;
+            let _ = futures::executor::block_on(self.refresh_settings(tx));
         }
     }
 }
@@ -263,5 +305,7 @@ mod tests {
         assert!(s.apps_entries.is_empty());
         assert!(!s.storage_dirty);
         assert!(!s.apps_dirty);
+        assert!(s.settings_storage.is_none());
+        assert!(s.settings_dirty, "Settings should fetch on first paint");
     }
 }

@@ -6,10 +6,12 @@ pub mod apps;
 pub mod dashboard;
 pub mod devices;
 pub mod help;
+pub mod settings;
 pub mod storage;
 
 pub use apps::Apps;
 pub use dashboard::Dashboard;
 pub use devices::Devices;
 pub use help::Help;
+pub use settings::Settings;
 pub use storage::{Storage, StorageLocation};
