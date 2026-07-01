@@ -1,12 +1,18 @@
 # flipper-tui — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **STATUS: v0.1 SHIPPED.** All 9 tasks landed across 10 commits on `main`
+> (`21ac037..b4746cf`). The checklist below was written for the original
+> Python/Textual design; the implementation pivoted to a Rust workspace
+> (4 crates) with ratatui instead of Textual. See **§ Implementation
+> status** at the bottom for the actual shipped scope. The unchecked
+> items remain as the v0.2 backlog (protobuf RPC, backup/restore,
+> firmware install, storage write ops).
 
-**Goal:** A terminal-native counterpart to qFlipper (device discovery, firmware update/repair, screen stream + remote control, .dfu install, backup/restore, CLI), shipped as a public Python package `flipper-tui` and a CLI script `flipper-tui-cli`, published to GitHub as `ankurCES/flipper-tui`.
+**Goal:** A terminal-native counterpart to qFlipper (device discovery, firmware update/repair, screen stream + remote control, .dfu install, backup/restore, CLI), shipped as a public Rust crate `flipper-tui` with two binaries (`flipper-tui` and `flipper-tui-cli`), published to GitHub as `ankurCES/flipper-tui`.
 
-**Architecture:** Three-layer Python project — `transport/` (async I/O over serial, mocks for tests), `flipper/` (domain logic, pure Python, no Textual), `tui/` (Textual screens + widgets). CLI is its own argparse surface that bypasses Textual for headless / scripted use. GPL-3.0 (qFlipper derivative). Tested hermetically.
+**Architecture:** Three-layer Rust workspace — `flipper-transport/` (async I/O over serial, MockTransport for tests), `flipper-core/` (domain logic, no Ratatui), `flipper-tui-app/` (Ratatui screens + widgets). CLI is its own clap surface that bypasses the TUI for headless / scripted use. GPL-3.0 (qFlipper derivative). Tested hermetically via `cargo test`.
 
-**Tech Stack:** Python 3.12, pyserial, textual ≥ 0.79, protobuf ≥ 5, pytest, pytest-asyncio, syrupy, ruff, hatchling, GitHub Actions (ubuntu/macos/windows × py3.12).
+**Tech Stack:** Rust stable (edition 2021), ratatui 0.29, crossterm 0.28, serialport 4.6, tokio 1.41, clap 4.5, thiserror/anyhow, tracing, GitHub Actions (ubuntu/macos/windows × stable).
 
 ---
 
@@ -1291,6 +1297,64 @@ Expect: 9 commits on main, all tests passing locally, public repo visible.
 - ✅ Each task = one bite-sized commit
 - ✅ Every code step shows the actual code
 - ✅ Tests are written first within each task and verified to pass
+
+---
+
+## Implementation status (v0.1 — shipped on `main` at `b4746cf`)
+
+The plan was originally written for a Python/Textual implementation.
+During execution (commits `21ac037..b4746cf`) the project pivoted to a
+Rust workspace with ratatui. All 9 tasks landed; the checklist above
+was never updated to `[x]` because the step bodies were rewritten in
+Rust. The table below maps the planned scope to what actually shipped.
+
+| Planned task                     | v0.1 status | What landed                                                                 |
+|----------------------------------|-------------|------------------------------------------------------------------------------|
+| 1 — Scaffold + license + CI      | ✅ Done     | `LICENSE`, `README.md`, `.github/workflows/ci.yml`, workspace `Cargo.toml`    |
+| 2 — Transport base + Mock        | ✅ Done     | `flipper-transport` crate: `base.rs`, `mock.rs`, `serial.rs`, `registry.rs` |
+| 3 — `device_info` hello + parse  | ✅ Done     | `flipper-core::device`, `protocol`, `info`, `exceptions`                    |
+| 4 — Storage list/read/stat       | ✅ Done     | `flipper-core::storage`, `parse_storage_list`, `flipper-core::protocol::stat` |
+| 5 — Backup module                | ⚠️  Stub    | `flipper-core::backup` typed shape; CLI prints "stub (lands in v0.2)"       |
+| 6 — Firmware updates             | ⚠️  Stub    | `flipper-core::updates` typed shape; CLI prints channel name only           |
+| 7 — CLI surface                  | ✅ Done     | `flipper-tui-cli` binary: info, ping, storage list/read/stat/mkdir, update  |
+| 8 — TUI screens + keymap         | ✅ Done     | `flipper-tui-app` crate: Devices, Dashboard, Storage, Apps, Settings, Updates, Help + keymap |
+| 9 — Repo create + push           | ✅ Done     | Public repo at `ankurCES/flipper-tui`, 10 commits pushed                    |
+
+**Post-v0.1 fixes (unplanned but shipped on `main`):**
+
+- `b4746cf` — added clap `--help`/`--version` + `--device`/`--baud` to
+  the interactive TUI binary. Without this, `flipper-tui --help` tried
+  to launch the TUI and crashed with "device_info: protocol parse error".
+
+**Gate evidence (v0.1):**
+
+- `cargo fmt --all -- --check` — clean
+- `cargo clippy --workspace --all-targets --locked -- -D warnings` — clean
+- `cargo test --workspace` — 64 passed / 0 failed (26 transport + 6 core
+  + 32 tui-app, plus 6 ignored live-device integration tests gated by
+  `FLIPPER_TUI_DEVICE`)
+- `cargo run --bin flipper-tui -- --help` — prints clap usage
+- `cargo run --bin flipper-tui-cli -- --help` — prints clap usage
+- `cargo run --bin flipper-tui-cli -- ping` — prints `ok` (no device)
+- `cargo run --bin flipper-tui-cli -- info` — fails with a clean error
+  when no Flipper is plugged in (expected; the README says to plug one
+  in or pass `--device <path>`)
+
+**v0.2 backlog (not started):**
+
+- Protobuf RPC channel — the Momentum ASCII CLI bridge covers ~70% of
+  qFlipper's surface but `device_info`, `firmware update`, and `backup`
+  are protobuf-only. Adding `prost` + the qFlipper `.proto` files is the
+  single biggest v0.2 unlock.
+- Real `backup` / `restore` (tar.gz over the protobuf RPC stream)
+- Real `firmware update` / `.dfu install` / `repair` (protobuf RPC +
+  USB DFU via `rusb`)
+- LCD screen stream + remote control (protobuf `screen_frame` codec,
+  16×→scaled half-block widget)
+- Storage write ops in the TUI: `mkdir`, `rename`, `remove` with
+  qFlipper-style confirmation dialogs (currently read-only)
+- NFC / Sub-GHz / IR / GPIO / BadUSB screens (scaffolded in `lib.rs`,
+  not implemented)
 - ✅ Layering rule enforced (transport knows nothing of flipper/tui; flipper knows nothing of tui)
 - ✅ GPL-3.0 license mirrors upstream
 - ✅ CLI subcommand set matches qFlipper-cli's surface (info/ping/backup/restore/install/storage/update/erase)
